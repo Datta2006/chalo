@@ -8,30 +8,35 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
-        body { font-family: 'Inter', sans-serif; }
+        body { font-family: 'Inter', sans-serif; background-color: #f0f4f8; }
         .page { display: none; }
-        .active-page { display: block; }
-        #chatMessages { scrollbar-width: thin; scrollbar-color: #4A5568 #EDF2F7; }
-        #chatMessages::-webkit-scrollbar { width: 6px; }
-        #chatMessages::-webkit-scrollbar-track { background: #EDF2F7; }
-        #chatMessages::-webkit-scrollbar-thumb { background-color: #4A5568; border-radius: 10px; }
+        .active-page { display: block; animation: fadeIn 0.5s; }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        #chatMessages { scrollbar-width: thin; scrollbar-color: #9CA3AF #E5E7EB; }
+        #chatMessages::-webkit-scrollbar { width: 8px; }
+        #chatMessages::-webkit-scrollbar-track { background: #E5E7EB; }
+        #chatMessages::-webkit-scrollbar-thumb { background-color: #9CA3AF; border-radius: 10px; border: 3px solid #E5E7EB; }
+        .btn { transition: all 0.2s ease-in-out; }
+        .btn:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+        .card { transition: all 0.2s ease-in-out; }
+        .card:hover { transform: scale(1.02); box-shadow: 0 10px 20px rgba(0,0,0,0.08); }
     </style>
 </head>
-<body class="bg-gray-100">
+<body>
 
-    <div id="app" class="max-w-4xl mx-auto bg-white shadow-lg min-h-screen">
-        <header class="bg-indigo-600 text-white p-4 flex justify-between items-center sticky top-0 z-50 shadow-md">
-            <h1 class="text-2xl font-bold cursor-pointer" id="logo">Chalo</h1>
+    <div id="app" class="max-w-4xl mx-auto bg-white shadow-2xl min-h-screen">
+        <header class="bg-gradient-to-r from-teal-500 to-cyan-600 text-white p-4 flex justify-between items-center sticky top-0 z-50 shadow-lg">
+            <h1 class="text-3xl font-bold cursor-pointer tracking-wider" id="logo">Chalo</h1>
             <nav id="nav-links" class="hidden md:flex items-center space-x-2">
-                <a href="#" class="px-3 py-2 hover:bg-indigo-700 rounded nav-link" data-page="home">Find Ride</a>
-                <a href="#" class="px-3 py-2 hover:bg-indigo-700 rounded nav-link" data-page="post-trip">Offer Ride</a>
-                <a href="#" class="px-3 py-2 hover:bg-indigo-700 rounded nav-link" data-page="my-trips">My Rides</a>
-                <a href="#" class="px-3 py-2 hover:bg-indigo-700 rounded nav-link" data-page="profile">Profile</a>
-                <a href="#" id="logout-btn" class="px-3 py-2 bg-red-500 hover:bg-red-600 rounded">Logout</a>
+                <a href="#" class="px-4 py-2 hover:bg-teal-600 rounded-md nav-link" data-page="home">Find Ride</a>
+                <a href="#" class="px-4 py-2 hover:bg-teal-600 rounded-md nav-link" data-page="post-trip">Offer Ride</a>
+                <a href="#" class="px-4 py-2 hover:bg-teal-600 rounded-md nav-link" data-page="my-trips">My Rides</a>
+                <a href="#" class="px-4 py-2 hover:bg-teal-600 rounded-md nav-link" data-page="profile">Profile</a>
+                <a href="#" id="logout-btn" class="px-4 py-2 bg-red-500 hover:bg-red-600 rounded-md font-semibold">Logout</a>
             </nav>
         </header>
 
-        <main class="p-4 md:p-6">
+        <main class="p-4 md:p-8">
             <div id="login" class="page"></div>
             <div id="register" class="page"></div>
             <div id="home" class="page"></div>
@@ -39,94 +44,36 @@
             <div id="my-trips" class="page"></div>
             <div id="profile" class="page"></div>
             <div id="chat" class="page"></div>
+            <div id="ride-details" class="page"></div>
+            <div id="manage-ride" class="page"></div>
         </main>
     </div>
 
     <!-- Modals -->
     <div id="loading-spinner" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[100] hidden">
-        <div class="animate-spin rounded-full h-16 w-16 border-t-4 border-b-4 border-white"></div>
+        <div class="animate-spin rounded-full h-20 w-20 border-t-4 border-b-4 border-teal-400"></div>
     </div>
-    <div id="alert-modal" class="fixed top-5 right-5 bg-red-500 text-white p-4 rounded-lg shadow-lg z-[100] hidden transition-opacity duration-300">
+    <div id="alert-modal" class="fixed top-5 right-5 text-white p-4 rounded-lg shadow-lg z-[100] hidden transition-all duration-300 transform translate-x-full" role="alert">
         <p id="alert-message"></p>
     </div>
 
 <script>
 const Templates = {
-    login: `
-        <h2 class="text-3xl font-bold mb-6 text-center text-gray-800">Welcome Back</h2>
-        <form id="login-form" class="space-y-4 max-w-sm mx-auto">
-            <input type="email" id="login-email" placeholder="Email" class="w-full p-3 border rounded-lg" required>
-            <input type="password" id="login-password" placeholder="Password" class="w-full p-3 border rounded-lg" required>
-            <button type="submit" class="w-full bg-indigo-600 text-white p-3 rounded-lg font-semibold">Login</button>
-            <p class="text-center">Don't have an account? <a href="#" class="text-indigo-600 nav-link" data-page="register">Register Now</a></p>
-        </form>`,
-    register: `
-        <h2 class="text-3xl font-bold mb-6 text-center text-gray-800">Create Your Account</h2>
-        <form id="register-form" class="space-y-4 max-w-md mx-auto">
-            <input type="text" name="name" placeholder="Full Name" class="w-full p-3 border rounded-lg" required>
-            <input type="email" name="email" placeholder="Email" class="w-full p-3 border rounded-lg" required>
-            <input type="tel" name="phone" placeholder="Phone Number" class="w-full p-3 border rounded-lg" required>
-            <input type="password" name="password" placeholder="Password (min. 8 characters)" class="w-full p-3 border rounded-lg" required>
-            <div class="grid grid-cols-2 gap-4">
-                <input type="date" name="dateOfBirth" class="w-full p-3 border rounded-lg" title="Date of Birth">
-                <select name="gender" class="w-full p-3 border rounded-lg bg-white"><option value="">Gender (Optional)</option><option value="male">Male</option><option value="female">Female</option><option value="other">Other</option></select>
-            </div>
-            <div class="flex items-center"><input type="checkbox" name="is_driver" class="mr-2 h-4 w-4"><label for="register-is-driver">I am a driver</label></div>
-            <button type="submit" class="w-full bg-indigo-600 text-white p-3 rounded-lg font-semibold">Register</button>
-            <p class="text-center">Already have an account? <a href="#" class="text-indigo-600 nav-link" data-page="login">Login</a></p>
-        </form>`,
-    home: `
-        <h2 class="text-3xl font-bold mb-4">Find a Ride</h2>
-        <form id="search-form" class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6 bg-gray-50 p-4 rounded-lg border">
-            <input type="text" name="origin" placeholder="Leaving from... (e.g. Delhi)" class="w-full p-2 border rounded">
-            <input type="text" name="destination" placeholder="Going to... (e.g. Mumbai)" class="w-full p-2 border rounded">
-            <input type="date" name="departureDate" class="w-full p-2 border rounded">
-            <button type="submit" class="w-full md:col-span-2 bg-indigo-600 text-white p-2 rounded font-semibold">Search</button>
-        </form>
-        <div id="trip-results" class="space-y-4"></div>`,
-    'post-trip': `
-        <h2 class="text-3xl font-bold mb-4">Offer a Ride</h2>
-        <form id="post-trip-form" class="space-y-4">
-            <input type="hidden" name="originLat" id="post-origin-lat" value="12.2958"><input type="hidden" name="originLng" id="post-origin-lng" value="76.6394">
-            <input type="hidden" name="destinationLat" id="post-dest-lat" value="12.9716"><input type="hidden" name="destinationLng" id="post-dest-lng" value="77.5946">
-            <div class="grid md:grid-cols-2 gap-4">
-                <input type="text" name="origin" id="post-origin" placeholder="Origin (e.g., Mysuru)" class="w-full p-3 border rounded-lg" required value="Mysuru">
-                <input type="text" name="destination" id="post-destination" placeholder="Destination (e.g., Bengaluru)" class="w-full p-3 border rounded-lg" required value="Bengaluru">
-            </div>
-            <div class="grid md:grid-cols-2 gap-4">
-                <input type="date" name="departureDate" id="post-date" class="w-full p-3 border rounded-lg" required>
-                <input type="time" name="departureTime" id="post-time" class="w-full p-3 border rounded-lg" required>
-            </div>
-            <div class="grid md:grid-cols-2 gap-4">
-                <input type="number" name="availableSeats" placeholder="Available Seats" class="w-full p-3 border rounded-lg" min="1" required>
-                <input type="number" name="suggestedFare" placeholder="Fare per seat (₹)" class="w-full p-3 border rounded-lg" min="0" required>
-            </div>
-            <input type="text" name="vehicle_info" placeholder="Vehicle Info (e.g., Toyota Camry, White)" class="w-full p-3 border rounded-lg">
-            <div class="space-y-2"><label class="font-semibold">Preferences:</label>
-                <div class="flex items-center"><input type="checkbox" name="smoking_allowed" class="mr-2 h-4 w-4"><label>Smoking Allowed</label></div>
-                <div class="flex items-center"><input type="checkbox" name="pets_allowed" class="mr-2 h-4 w-4"><label>Pets Allowed</label></div>
-                <div class="flex items-center"><input type="checkbox" name="luggage_allowed" class="mr-2 h-4 w-4" checked><label>Luggage Allowed</label></div>
-            </div>
-            <button type="submit" class="w-full bg-indigo-600 text-white p-3 rounded-lg font-semibold">Publish Ride</button>
-        </form>`,
+    login: `<h2 class="text-3xl font-bold mb-6 text-center text-gray-800">Welcome Back</h2><form id="login-form" class="space-y-4 max-w-sm mx-auto"><input type="email" id="login-email" placeholder="Email" class="w-full p-3 border-gray-300 border rounded-lg focus:ring-2 focus:ring-teal-500" required><input type="password" id="login-password" placeholder="Password" class="w-full p-3 border-gray-300 border rounded-lg focus:ring-2 focus:ring-teal-500" required><button type="submit" class="w-full bg-teal-500 text-white p-3 rounded-lg font-semibold btn">Login</button><p class="text-center">Don't have an account? <a href="#" class="text-teal-600 font-semibold nav-link" data-page="register">Register Now</a></p></form>`,
+    register: `<h2 class="text-3xl font-bold mb-6 text-center text-gray-800">Create Your Account</h2><form id="register-form" class="space-y-4 max-w-md mx-auto"><input type="text" name="name" placeholder="Full Name" class="w-full p-3 border-gray-300 border rounded-lg" required><input type="email" name="email" placeholder="Email" class="w-full p-3 border-gray-300 border rounded-lg" required><input type="tel" name="phone" placeholder="Phone Number" class="w-full p-3 border-gray-300 border rounded-lg" required><input type="password" name="password" placeholder="Password (min. 8 characters)" class="w-full p-3 border-gray-300 border rounded-lg" required><div class="grid grid-cols-2 gap-4"><input type="date" name="dateOfBirth" class="w-full p-3 border-gray-300 border rounded-lg" title="Date of Birth"><select name="gender" class="w-full p-3 border-gray-300 border rounded-lg bg-white"><option value="">Gender (Optional)</option><option value="male">Male</option><option value="female">Female</option><option value="other">Other</option></select></div><div class="flex items-center"><input type="checkbox" name="is_driver" class="mr-2 h-4 w-4 text-teal-600 focus:ring-teal-500"><label for="register-is-driver">I am a driver</label></div><button type="submit" class="w-full bg-teal-500 text-white p-3 rounded-lg font-semibold btn">Register</button><p class="text-center">Already have an account? <a href="#" class="text-teal-600 font-semibold nav-link" data-page="login">Login</a></p></form>`,
+    home: `<h2 class="text-3xl font-bold mb-4">Find a Ride</h2><form id="search-form" class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8 bg-gray-50 p-6 rounded-lg border shadow-sm"><input type="text" name="origin" placeholder="Leaving from... (e.g. Delhi)" class="w-full p-3 border-gray-300 border rounded-lg"><input type="text" name="destination" placeholder="Going to... (e.g. Mumbai)" class="w-full p-3 border-gray-300 border rounded-lg"><input type="date" name="departureDate" class="w-full p-3 border-gray-300 border rounded-lg"><button type="submit" class="w-full md:col-span-2 bg-teal-500 text-white p-3 rounded-lg font-semibold btn">Search</button></form><div id="trip-results" class="space-y-6"></div>`,
+    'post-trip': `<h2 class="text-3xl font-bold mb-4">Offer a Ride</h2><form id="post-trip-form" class="space-y-4"><input type="hidden" name="originLat" value="12.2958"><input type="hidden" name="originLng" value="76.6394"><input type="hidden" name="destinationLat" value="12.9716"><input type="hidden" name="destinationLng" value="77.5946"><div class="grid md:grid-cols-2 gap-4"><input type="text" name="origin" placeholder="Origin (e.g., Mysuru)" class="w-full p-3 border-gray-300 border rounded-lg" required value="Mysuru"><input type="text" name="destination" placeholder="Destination (e.g., Bengaluru)" class="w-full p-3 border-gray-300 border rounded-lg" required value="Bengaluru"></div><div class="grid md:grid-cols-2 gap-4"><input type="date" name="departureDate" class="w-full p-3 border-gray-300 border rounded-lg" required><input type="time" name="departureTime" class="w-full p-3 border-gray-300 border rounded-lg" required></div><div class="grid md:grid-cols-2 gap-4"><input type="number" name="availableSeats" placeholder="Available Seats" class="w-full p-3 border-gray-300 border rounded-lg" min="1" required><input type="number" name="suggestedFare" placeholder="Fare per seat (₹)" class="w-full p-3 border-gray-300 border rounded-lg" min="0" required></div><input type="text" name="vehicle_info" placeholder="Vehicle Info (e.g., Toyota Camry, White)" class="w-full p-3 border-gray-300 border rounded-lg"><div class="space-y-2 pt-2"><label class="font-semibold text-gray-700">Preferences:</label><div class="flex items-center"><input type="checkbox" name="smoking_allowed" class="mr-2 h-4 w-4 text-teal-600"><label>Smoking Allowed</label></div><div class="flex items-center"><input type="checkbox" name="pets_allowed" class="mr-2 h-4 w-4 text-teal-600"><label>Pets Allowed</label></div><div class="flex items-center"><input type="checkbox" name="luggage_allowed" class="mr-2 h-4 w-4 text-teal-600" checked><label>Luggage Allowed</label></div></div><button type="submit" class="w-full bg-teal-500 text-white p-3 rounded-lg font-semibold btn">Publish Ride</button></form>`,
     'my-trips': `<h2 class="text-3xl font-bold mb-4">My Rides</h2><div id="my-trips-list"></div>`,
-    profile: `<h2 class="text-3xl font-bold mb-4">My Profile</h2><div id="profile-details" class="bg-gray-50 p-6 rounded-lg space-y-3 border"></div>`,
-    chat: `
-        <h2 class="text-3xl font-bold mb-4" id="chat-header">Chat</h2>
-        <div id="chat-container" class="border rounded-lg flex flex-col h-[60vh]">
-            <div id="chatMessages" class="flex-1 p-4 overflow-y-auto bg-gray-50"></div>
-            <form id="chat-form" class="p-4 border-t flex">
-                <input type="text" id="chat-input" class="flex-1 p-2 border rounded-l-md" placeholder="Type a message...">
-                <button type="submit" class="bg-indigo-600 text-white px-4 rounded-r-md">Send</button>
-            </form>
-        </div>`
+    profile: `<h2 class="text-3xl font-bold mb-4">My Profile</h2><div id="profile-details" class="bg-gray-50 p-6 rounded-lg space-y-3 border shadow-sm"></div>`,
+    'ride-details': `<div id="ride-details-content"></div>`,
+    'manage-ride': `<div id="manage-ride-content"></div>`,
+    chat: `<h2 class="text-3xl font-bold mb-4" id="chat-header">Chat</h2><div id="chat-container" class="border rounded-lg flex flex-col h-[60vh] shadow-inner"><div id="chatMessages" class="flex-1 p-4 overflow-y-auto bg-gray-50"></div><form id="chat-form" class="p-4 border-t flex"><input type="text" id="chat-input" class="flex-1 p-2 border-gray-300 border rounded-l-md" placeholder="Type a message..."><button type="submit" class="bg-teal-500 text-white px-4 rounded-r-md">Send</button></form></div>`
 };
 
 document.addEventListener('DOMContentLoaded', () => {
     const state = { accessToken: localStorage.getItem('accessToken'), refreshToken: localStorage.getItem('refreshToken'), user: JSON.parse(localStorage.getItem('user')), socket: null, currentChatRequestId: null, currentPage: 'login' };
     const API_URL = '';
-    const pages = { login: document.getElementById('login'), register: document.getElementById('register'), home: document.getElementById('home'), 'post-trip': document.getElementById('post-trip'), 'my-trips': document.getElementById('my-trips'), profile: document.getElementById('profile'), chat: document.getElementById('chat') };
-    const navLinks = document.getElementById('nav-links');
+    const pages = { login: document.getElementById('login'), register: document.getElementById('register'), home: document.getElementById('home'), 'post-trip': document.getElementById('post-trip'), 'my-trips': document.getElementById('my-trips'), profile: document.getElementById('profile'), chat: document.getElementById('chat'), 'ride-details': document.getElementById('ride-details'), 'manage-ride': document.getElementById('manage-ride') };
     
     async function apiRequest(endpoint, method = 'GET', body = null) {
         showLoading(true);
@@ -136,8 +83,7 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             let response = await fetch(API_URL + endpoint, config);
             if (response.status === 401 && state.refreshToken) {
-                const refreshSuccess = await refreshAccessToken();
-                if (refreshSuccess) {
+                if (await refreshAccessToken()) {
                     headers['Authorization'] = `Bearer ${state.accessToken}`;
                     response = await fetch(API_URL + endpoint, config);
                 } else {
@@ -172,7 +118,7 @@ document.addEventListener('DOMContentLoaded', () => {
         Object.values(pages).forEach(p => p.classList.remove('active-page'));
         if (pages[pageId]) {
             pages[pageId].classList.add('active-page');
-            pages[pageId].innerHTML = Templates[pageId];
+            if(Templates[pageId]) pages[pageId].innerHTML = Templates[pageId];
             if (pageId === 'post-trip') {
                 setTimeout(() => {
                     const now = new Date();
@@ -189,12 +135,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function updateUIForAuthState() {
         if (state.accessToken && state.user) {
-            navLinks.classList.remove('hidden');
+            document.getElementById('nav-links').classList.remove('hidden');
             showPage('home');
             loadHomePageData();
             connectSocket();
         } else {
-            navLinks.classList.add('hidden');
+            document.getElementById('nav-links').classList.add('hidden');
             showPage('login');
         }
     }
@@ -204,59 +150,54 @@ document.addEventListener('DOMContentLoaded', () => {
     function showAlert(message, isSuccess = false) {
         const modal = document.getElementById('alert-modal');
         document.getElementById('alert-message').textContent = message;
-        modal.className = `fixed top-5 right-5 text-white p-4 rounded-lg shadow-lg z-[100] ${isSuccess ? 'bg-green-500' : 'bg-red-500'}`;
+        modal.className = `fixed top-5 right-5 text-white p-4 rounded-lg shadow-lg z-[100] transition-all duration-300 transform ${isSuccess ? 'bg-green-500' : 'bg-red-500'}`;
+        setTimeout(() => modal.classList.remove('translate-x-full'), 10);
         clearTimeout(alertTimeout);
-        alertTimeout = setTimeout(() => modal.classList.add('hidden'), 4000);
+        alertTimeout = setTimeout(() => modal.classList.add('translate-x-full'), 4000);
     }
 
     function renderTripResults(trips) {
         const container = document.getElementById('trip-results');
         if (!container) return;
-        container.innerHTML = !trips || trips.length === 0 ? `<p class="text-gray-500 text-center">No rides found.</p>` : trips.map(trip => `
-            <div class="border rounded-lg p-4 shadow-sm">
-                <div><p class="font-bold text-lg">${trip.origin} to ${trip.destination}</p><p class="text-sm text-gray-600">Driver: ${trip.driver_name} (⭐ ${trip.driver_rating || 'N/A'})</p></div>
-                <div class="text-right"><p class="font-bold text-xl text-indigo-600">₹${trip.suggested_fare}</p></div>
-                <div class="mt-4 text-sm flex justify-between"><span>📅 ${new Date(trip.departure_date).toLocaleDateString()} at ${trip.departure_time.slice(0,5)}</span><span>💺 ${trip.available_seats - trip.booked_seats} seats left</span></div>
-                <button class="request-ride-btn mt-4 w-full bg-green-500 text-white p-2 rounded" data-trip-id="${trip.id}">Request Ride</button>
+        container.innerHTML = !trips || trips.length === 0 ? `<div class="text-center py-10"><svg class="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg><h3 class="mt-2 text-sm font-medium text-gray-900">No Rides Found</h3><p class="mt-1 text-sm text-gray-500">Try adjusting your search criteria.</p></div>` : trips.map(trip => `
+            <div class="border rounded-lg p-5 shadow-sm card bg-white">
+                <div class="flex justify-between items-start">
+                    <div>
+                        <p class="font-bold text-xl text-gray-800">${trip.origin} → ${trip.destination}</p>
+                        <p class="text-sm text-gray-600 mt-1 flex items-center"><svg class="w-4 h-4 mr-1.5 text-gray-500" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clip-rule="evenodd"></path></svg> Driver: ${trip.driver_name} (⭐ ${trip.driver_rating || 'N/A'})</p>
+                    </div>
+                    <div class="text-right flex-shrink-0 ml-4">
+                        <p class="font-bold text-2xl text-teal-600">₹${trip.suggested_fare}</p>
+                        <p class="text-xs text-gray-500">per seat</p>
+                    </div>
+                </div>
+                <div class="mt-4 pt-4 border-t border-gray-200 text-sm text-gray-700 flex justify-between items-center">
+                    <div class="flex items-center"><svg class="w-4 h-4 mr-1.5 text-gray-500" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M6 2a1 1 0 00-1 1v1H4a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2h-1V3a1 1 0 10-2 0v1H7V3a1 1 0 00-1-1zm0 5a1 1 0 000 2h8a1 1 0 100-2H6z" clip-rule="evenodd"></path></svg> ${new Date(trip.departure_date).toLocaleDateString('en-IN', { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' })} at ${trip.departure_time.slice(0,5)}</div>
+                    <div class="flex items-center font-semibold"><svg class="w-4 h-4 mr-1.5 text-gray-500" fill="currentColor" viewBox="0 0 20 20"><path d="M9 6a3 3 0 11-6 0 3 3 0 016 0zm-1.5 6a1.5 1.5 0 100-3 1.5 1.5 0 000 3zm1.5-1.5a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0zm6 1.5a1.5 1.5 0 100-3 1.5 1.5 0 000 3zm1.5-1.5a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0zM17 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg> ${trip.available_seats - trip.booked_seats} seats left</div>
+                </div>
+                <button class="request-ride-btn mt-4 w-full bg-green-500 text-white p-3 rounded-lg font-semibold btn" data-trip-id="${trip.id}">Request Ride</button>
             </div>`).join('');
     }
     
     function renderMyTrips(data) {
         const container = document.getElementById('my-trips-list');
         if (!container) return;
-        let html = `<h3 class="text-xl font-semibold mb-2 border-b pb-2">Rides You're Offering</h3>`;
+        let html = `<h3 class="text-2xl font-bold mb-4 border-b pb-2 text-gray-800">Rides You're Offering</h3>`;
         html += (!data.offered || data.offered.length === 0) ? `<p class="text-gray-500">You haven't offered any rides.</p>` : data.offered.map(trip => `
-            <div class="border rounded-lg p-4 mb-4 shadow-sm">
-                <p class="font-bold">${trip.origin} to ${trip.destination}</p>
-                <p>Date: ${new Date(trip.departure_date).toLocaleDateString()} at ${trip.departure_time.slice(0,5)}</p>
-                <p>Status: <span class="font-semibold capitalize text-green-600">${trip.status}</span></p>
-                <div class="mt-2 space-x-2">
-                    ${trip.status === 'active' ? `<button class="start-trip-btn bg-blue-500 text-white px-3 py-1 rounded text-sm" data-trip-id="${trip.id}">Start</button>` : ''}
-                    ${trip.status === 'started' ? `<button class="complete-trip-btn bg-green-500 text-white px-3 py-1 rounded text-sm" data-trip-id="${trip.id}">Complete</button>` : ''}
-                </div>
-                <div id="requests-for-trip-${trip.id}" class="mt-2"></div>
+            <div class="border rounded-lg p-4 mb-4 shadow-sm bg-white">
+                <p class="font-bold text-lg">${trip.origin} → ${trip.destination}</p>
+                <p class="text-sm text-gray-600">Date: ${new Date(trip.departure_date).toLocaleDateString()}</p>
+                <p class="text-sm text-gray-600">Status: <span class="font-semibold capitalize text-teal-600">${trip.status}</span></p>
+                <button class="manage-ride-btn mt-3 bg-indigo-500 text-white px-4 py-2 rounded-lg text-sm font-semibold btn" data-trip-id="${trip.id}">Manage Ride</button>
             </div>`).join('');
-        html += `<h3 class="text-xl font-semibold mt-6 mb-2 border-b pb-2">Rides You've Requested</h3>`;
+        html += `<h3 class="text-2xl font-bold mt-8 mb-4 border-b pb-2 text-gray-800">Rides You've Requested</h3>`;
         html += (!data.booked || data.booked.length === 0) ? `<p class="text-gray-500">You haven't booked any rides.</p>` : data.booked.map(req => `
-            <div class="border rounded-lg p-4 mb-4 shadow-sm">
-                <p class="font-bold">${req.origin} to ${req.destination}</p>
-                <p>Status: <span class="font-semibold capitalize text-indigo-600">${req.request_status}</span></p>
-                ${req.request_status === 'accepted' ? `<button class="chat-btn mt-2 bg-purple-500 text-white p-2 rounded text-sm" data-request-id="${req.id}">Chat</button>` : ''}
+            <div class="border rounded-lg p-4 mb-4 shadow-sm bg-white">
+                <p class="font-bold text-lg">${req.origin} → ${req.destination}</p>
+                <p class="text-sm text-gray-600">Status: <span class="font-semibold capitalize text-indigo-600">${req.request_status}</span></p>
+                <button class="view-details-btn mt-3 bg-gray-700 text-white px-4 py-2 rounded-lg text-sm font-semibold btn" data-request-id="${req.request_id}">View Details</button>
             </div>`).join('');
         container.innerHTML = html;
-    }
-
-    function renderRideRequestsForDriver(tripId, requests) {
-        const container = document.getElementById(`requests-for-trip-${tripId}`);
-        if (!container || !requests || requests.length === 0) return;
-        container.innerHTML = `<h4 class="font-semibold mt-3">Pending Requests:</h4>` + requests.map(req => `
-            <div class="bg-gray-100 p-2 rounded mt-2 flex justify-between items-center">
-                <p>${req.passenger_name} (${req.requested_seats} seat(s))</p>
-                <div>
-                    <button class="accept-request-btn bg-green-500 text-white px-2 py-1 text-sm rounded" data-request-id="${req.id}">Accept</button>
-                    <button class="decline-request-btn bg-red-500 text-white px-2 py-1 text-sm rounded ml-1" data-request-id="${req.id}">Decline</button>
-                </div>
-            </div>`).join('');
     }
 
     function renderProfile(profile) {
@@ -265,10 +206,29 @@ document.addEventListener('DOMContentLoaded', () => {
         container.innerHTML = `<p><strong>Name:</strong> ${profile.name}</p><p><strong>Email:</strong> ${profile.email}</p><p><strong>Phone:</strong> ${profile.phone || 'N/A'}</p><p><strong>Role:</strong> ${profile.is_driver ? 'Driver & Passenger' : 'Passenger'}</p><p><strong>Rating:</strong> ⭐ ${profile.rating || 'N/A'} (${profile.total_ratings} ratings)</p>`;
     }
 
+    function renderRideDetails(details) {
+        const container = document.getElementById('ride-details-content');
+        if (!container) return;
+        const isDriver = state.user.id === details.driver_id;
+        container.innerHTML = `<h2 class="text-3xl font-bold mb-4">Ride Details</h2><div class="bg-gray-50 p-6 rounded-lg space-y-3 border shadow-sm"><p class="text-xl font-bold">${details.origin} → ${details.destination}</p><p><strong>Date:</strong> ${new Date(details.departure_date).toLocaleDateString()}</p><hr class="my-4"><h4 class="text-lg font-semibold">${isDriver ? 'Passenger Details' : 'Driver Details'}</h4><p><strong>Name:</strong> ${isDriver ? details.passenger_name : details.driver_name}</p><p><strong>Rating:</strong> ⭐ ${isDriver ? details.passenger_rating || 'N/A' : details.driver_rating || 'N/A'}</p>${!isDriver ? `<p><strong>Vehicle:</strong> ${details.vehicle_info || 'Not specified'}</p>` : ''}<hr class="my-4"><button class="chat-btn w-full bg-purple-500 text-white p-3 rounded-lg font-semibold btn" data-request-id="${details.id}">Open Chat</button></div>`;
+    }
+
+    function renderManageRide(data) {
+        const container = document.getElementById('manage-ride-content');
+        if (!container) return;
+        const { tripDetails, pendingRequests, acceptedPassengers } = data;
+        let html = `<h2 class="text-3xl font-bold mb-4">Manage Ride</h2><div class="bg-gray-50 p-6 rounded-lg space-y-3 border mb-6 shadow-sm"><p class="text-xl font-bold">${tripDetails.origin} → ${tripDetails.destination}</p><p><strong>Date:</strong> ${new Date(tripDetails.departure_date).toLocaleDateString()}</p><p><strong>Status:</strong> <span class="font-semibold capitalize text-teal-600">${tripDetails.status}</span></p><div class="mt-2 space-x-2">${tripDetails.status === 'active' ? `<button class="start-trip-btn bg-blue-500 text-white px-4 py-2 rounded-lg text-sm font-semibold btn" data-trip-id="${tripDetails.id}">Start Trip</button>` : ''}${tripDetails.status === 'started' ? `<button class="complete-trip-btn bg-green-500 text-white px-4 py-2 rounded-lg text-sm font-semibold btn" data-trip-id="${tripDetails.id}">Complete Trip</button>` : ''}</div></div>`;
+        html += `<h3 class="text-2xl font-bold mb-4 border-b pb-2">Accepted Passengers</h3>`;
+        html += (!acceptedPassengers || acceptedPassengers.length === 0) ? `<p class="text-gray-500">No passengers accepted yet.</p>` : acceptedPassengers.map(pax => `<div class="border rounded-lg p-3 mb-2 flex justify-between items-center bg-white shadow-sm"><div><p><strong>${pax.passenger_name}</strong> (⭐ ${pax.rating || 'N/A'})</p><p class="text-sm text-gray-600">${pax.requested_seats} seat(s)</p></div><button class="chat-btn bg-purple-500 text-white px-3 py-1 rounded-md text-sm font-semibold btn" data-request-id="${pax.id}">Chat</button></div>`).join('');
+        html += `<h3 class="text-2xl font-bold mt-6 mb-4 border-b pb-2">Pending Requests</h3>`;
+        html += (!pendingRequests || pendingRequests.length === 0) ? `<p class="text-gray-500">No pending requests.</p>` : pendingRequests.map(req => `<div class="border rounded-lg p-3 mb-2 flex justify-between items-center bg-white shadow-sm"><div><p><strong>${req.passenger_name}</strong> (⭐ ${req.rating || 'N/A'})</p><p class="text-sm text-gray-600">${req.requested_seats} seat(s)</p></div><div class="space-x-2"><button class="accept-request-btn bg-green-500 text-white px-3 py-1 rounded-md text-sm font-semibold btn" data-request-id="${req.id}">Accept</button><button class="decline-request-btn bg-red-500 text-white px-3 py-1 rounded-md text-sm font-semibold btn" data-request-id="${req.id}">Decline</button></div></div>`).join('');
+        container.innerHTML = html;
+    }
+
     function renderChatMessages(messages) {
         const container = document.getElementById('chatMessages');
         if(!container) return;
-        container.innerHTML = messages.map(msg => `<div class="flex ${msg.sender_id === state.user.id ? 'justify-end' : 'justify-start'} mb-2"><div class="rounded-lg p-2 max-w-xs ${msg.sender_id === state.user.id ? 'bg-indigo-500 text-white' : 'bg-gray-300'}"><p>${msg.message}</p></div></div>`).join('');
+        container.innerHTML = messages.map(msg => `<div class="flex ${msg.sender_id === state.user.id ? 'justify-end' : 'justify-start'} mb-2"><div class="rounded-lg p-3 max-w-xs ${msg.sender_id === state.user.id ? 'bg-indigo-500 text-white' : 'bg-gray-200'}"><p>${msg.message}</p></div></div>`).join('');
         container.scrollTop = container.scrollHeight;
     }
 
@@ -317,9 +277,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const formData = new FormData(e.target);
         const params = new URLSearchParams();
         for (const [key, value] of formData.entries()) {
-            if (value) {
-                params.append(key, value);
-            }
+            if (value) params.append(key, value);
         }
         const data = await apiRequest(`/api/trips/search?${params.toString()}`);
         if (data) renderTripResults(data.trips);
@@ -341,19 +299,11 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function loadMyTripsData() {
-        const [offered, booked, pending] = await Promise.all([
+        const [offered, booked] = await Promise.all([
             apiRequest('/api/my-trips?role=driver'),
             apiRequest('/api/my-trips?role=passenger'),
-            apiRequest('/api/ride-requests/driver?status=pending')
         ]);
         renderMyTrips({ offered: offered?.trips, booked: booked?.trips });
-        if (pending?.requests) {
-            const requestsByTrip = pending.requests.reduce((acc, req) => {
-                (acc[req.trip_id] = acc[req.trip_id] || []).push(req);
-                return acc;
-            }, {});
-            for (const tripId in requestsByTrip) renderRideRequestsForDriver(tripId, requestsByTrip[tripId]);
-        }
     }
 
     async function loadProfileData() {
@@ -378,7 +328,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const result = await apiRequest(`/api/ride-requests/${requestId}/status`, 'PUT', { status });
         if (result) {
             showAlert(`Request ${status}!`, true);
-            loadMyTripsData();
+            handleManageRide(state.currentManagedTripId); // Refresh the management page
         }
     }
 
@@ -386,7 +336,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const result = await apiRequest(`/api/trips/${tripId}/${status}`, 'PUT');
         if (result) {
             showAlert(`Trip ${status} successfully!`, true);
-            loadMyTripsData();
+            handleManageRide(tripId);
         }
     }
     
@@ -408,6 +358,19 @@ document.addEventListener('DOMContentLoaded', () => {
             state.socket.emit('send_message', { requestId: state.currentChatRequestId, message });
             input.value = '';
         }
+    }
+
+    async function handleViewDetails(requestId) {
+        showPage('ride-details');
+        const data = await apiRequest(`/api/ride-requests/${requestId}`);
+        if (data) renderRideDetails(data);
+    }
+
+    async function handleManageRide(tripId) {
+        state.currentManagedTripId = tripId; // Keep track of which trip we're managing
+        showPage('manage-ride');
+        const data = await apiRequest(`/api/trips/${tripId}/management`);
+        if (data) renderManageRide(data);
     }
     
     function connectSocket() {
@@ -440,22 +403,27 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         
         document.body.addEventListener('click', e => {
-            if (e.target.classList.contains('nav-link')) {
+            const target = e.target.closest('[data-page], #logo, #logout-btn, .request-ride-btn, .accept-request-btn, .decline-request-btn, .chat-btn, .start-trip-btn, .complete-trip-btn, .view-details-btn, .manage-ride-btn');
+            if (!target) return;
+
+            if (target.classList.contains('nav-link')) {
                 e.preventDefault();
-                const pageId = e.target.dataset.page;
+                const pageId = target.dataset.page;
                 showPage(pageId);
                 if (pageId === 'home') loadHomePageData();
                 if (pageId === 'my-trips') loadMyTripsData();
                 if (pageId === 'profile') loadProfileData();
             }
-            if (e.target.id === 'logo' && state.user) { showPage('home'); loadHomePageData(); }
-            if (e.target.id === 'logout-btn') handleLogout();
-            if (e.target.classList.contains('request-ride-btn')) handleRequestRide(e.target.dataset.tripId);
-            if (e.target.classList.contains('accept-request-btn')) handleRequestStatusUpdate(e.target.dataset.requestId, 'accepted');
-            if (e.target.classList.contains('decline-request-btn')) handleRequestStatusUpdate(e.target.dataset.requestId, 'declined');
-            if (e.target.classList.contains('chat-btn')) openChat(e.target.dataset.requestId);
-            if (e.target.classList.contains('start-trip-btn')) handleTripStatusUpdate(e.target.dataset.tripId, 'start');
-            if (e.target.classList.contains('complete-trip-btn')) handleTripStatusUpdate(e.target.dataset.tripId, 'complete');
+            if (target.id === 'logo' && state.user) { showPage('home'); loadHomePageData(); }
+            if (target.id === 'logout-btn') handleLogout();
+            if (target.classList.contains('request-ride-btn')) handleRequestRide(target.dataset.tripId);
+            if (target.classList.contains('accept-request-btn')) handleRequestStatusUpdate(target.dataset.requestId, 'accepted');
+            if (target.classList.contains('decline-request-btn')) handleRequestStatusUpdate(target.dataset.requestId, 'declined');
+            if (target.classList.contains('chat-btn')) openChat(target.dataset.requestId);
+            if (target.classList.contains('start-trip-btn')) handleTripStatusUpdate(target.dataset.tripId, 'start');
+            if (target.classList.contains('complete-trip-btn')) handleTripStatusUpdate(target.dataset.tripId, 'complete');
+            if (target.classList.contains('view-details-btn')) handleViewDetails(target.dataset.requestId);
+            if (target.classList.contains('manage-ride-btn')) handleManageRide(target.dataset.tripId);
         });
     }
 
