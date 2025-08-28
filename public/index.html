@@ -1,0 +1,470 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chalo - Ride Sharing</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .page { display: none; }
+        .active-page { display: block; }
+        #chatMessages { scrollbar-width: thin; scrollbar-color: #4A5568 #EDF2F7; }
+        #chatMessages::-webkit-scrollbar { width: 6px; }
+        #chatMessages::-webkit-scrollbar-track { background: #EDF2F7; }
+        #chatMessages::-webkit-scrollbar-thumb { background-color: #4A5568; border-radius: 10px; }
+    </style>
+</head>
+<body class="bg-gray-100">
+
+    <div id="app" class="max-w-4xl mx-auto bg-white shadow-lg min-h-screen">
+        <header class="bg-indigo-600 text-white p-4 flex justify-between items-center sticky top-0 z-50 shadow-md">
+            <h1 class="text-2xl font-bold cursor-pointer" id="logo">Chalo</h1>
+            <nav id="nav-links" class="hidden md:flex items-center space-x-2">
+                <a href="#" class="px-3 py-2 hover:bg-indigo-700 rounded nav-link" data-page="home">Find Ride</a>
+                <a href="#" class="px-3 py-2 hover:bg-indigo-700 rounded nav-link" data-page="post-trip">Offer Ride</a>
+                <a href="#" class="px-3 py-2 hover:bg-indigo-700 rounded nav-link" data-page="my-trips">My Rides</a>
+                <a href="#" class="px-3 py-2 hover:bg-indigo-700 rounded nav-link" data-page="profile">Profile</a>
+                <a href="#" id="logout-btn" class="px-3 py-2 bg-red-500 hover:bg-red-600 rounded">Logout</a>
+            </nav>
+        </header>
+
+        <main class="p-4 md:p-6">
+            <div id="login" class="page"></div>
+            <div id="register" class="page"></div>
+            <div id="home" class="page"></div>
+            <div id="post-trip" class="page"></div>
+            <div id="my-trips" class="page"></div>
+            <div id="profile" class="page"></div>
+            <div id="chat" class="page"></div>
+        </main>
+    </div>
+
+    <!-- Modals -->
+    <div id="loading-spinner" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[100] hidden">
+        <div class="animate-spin rounded-full h-16 w-16 border-t-4 border-b-4 border-white"></div>
+    </div>
+    <div id="alert-modal" class="fixed top-5 right-5 bg-red-500 text-white p-4 rounded-lg shadow-lg z-[100] hidden transition-opacity duration-300">
+        <p id="alert-message"></p>
+    </div>
+
+<script>
+const Templates = {
+    login: `
+        <h2 class="text-3xl font-bold mb-6 text-center text-gray-800">Welcome Back</h2>
+        <form id="login-form" class="space-y-4 max-w-sm mx-auto">
+            <input type="email" id="login-email" placeholder="Email" class="w-full p-3 border rounded-lg" required>
+            <input type="password" id="login-password" placeholder="Password" class="w-full p-3 border rounded-lg" required>
+            <button type="submit" class="w-full bg-indigo-600 text-white p-3 rounded-lg font-semibold">Login</button>
+            <p class="text-center">Don't have an account? <a href="#" class="text-indigo-600 nav-link" data-page="register">Register Now</a></p>
+        </form>`,
+    register: `
+        <h2 class="text-3xl font-bold mb-6 text-center text-gray-800">Create Your Account</h2>
+        <form id="register-form" class="space-y-4 max-w-md mx-auto">
+            <input type="text" name="name" placeholder="Full Name" class="w-full p-3 border rounded-lg" required>
+            <input type="email" name="email" placeholder="Email" class="w-full p-3 border rounded-lg" required>
+            <input type="tel" name="phone" placeholder="Phone Number" class="w-full p-3 border rounded-lg" required>
+            <input type="password" name="password" placeholder="Password (min. 8 characters)" class="w-full p-3 border rounded-lg" required>
+            <div class="grid grid-cols-2 gap-4">
+                <input type="date" name="dateOfBirth" class="w-full p-3 border rounded-lg" title="Date of Birth">
+                <select name="gender" class="w-full p-3 border rounded-lg bg-white"><option value="">Gender (Optional)</option><option value="male">Male</option><option value="female">Female</option><option value="other">Other</option></select>
+            </div>
+            <div class="flex items-center"><input type="checkbox" name="is_driver" class="mr-2 h-4 w-4"><label for="register-is-driver">I am a driver</label></div>
+            <button type="submit" class="w-full bg-indigo-600 text-white p-3 rounded-lg font-semibold">Register</button>
+            <p class="text-center">Already have an account? <a href="#" class="text-indigo-600 nav-link" data-page="login">Login</a></p>
+        </form>`,
+    home: `
+        <h2 class="text-3xl font-bold mb-4">Find a Ride</h2>
+        <form id="search-form" class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6 bg-gray-50 p-4 rounded-lg border">
+            <input type="text" name="origin" placeholder="Leaving from... (e.g. Delhi)" class="w-full p-2 border rounded">
+            <input type="text" name="destination" placeholder="Going to... (e.g. Mumbai)" class="w-full p-2 border rounded">
+            <input type="date" name="departureDate" class="w-full p-2 border rounded">
+            <button type="submit" class="w-full md:col-span-2 bg-indigo-600 text-white p-2 rounded font-semibold">Search</button>
+        </form>
+        <div id="trip-results" class="space-y-4"></div>`,
+    'post-trip': `
+        <h2 class="text-3xl font-bold mb-4">Offer a Ride</h2>
+        <form id="post-trip-form" class="space-y-4">
+            <input type="hidden" name="originLat" id="post-origin-lat" value="12.2958"><input type="hidden" name="originLng" id="post-origin-lng" value="76.6394">
+            <input type="hidden" name="destinationLat" id="post-dest-lat" value="12.9716"><input type="hidden" name="destinationLng" id="post-dest-lng" value="77.5946">
+            <div class="grid md:grid-cols-2 gap-4">
+                <input type="text" name="origin" id="post-origin" placeholder="Origin (e.g., Mysuru)" class="w-full p-3 border rounded-lg" required value="Mysuru">
+                <input type="text" name="destination" id="post-destination" placeholder="Destination (e.g., Bengaluru)" class="w-full p-3 border rounded-lg" required value="Bengaluru">
+            </div>
+            <div class="grid md:grid-cols-2 gap-4">
+                <input type="date" name="departureDate" id="post-date" class="w-full p-3 border rounded-lg" required>
+                <input type="time" name="departureTime" id="post-time" class="w-full p-3 border rounded-lg" required>
+            </div>
+            <div class="grid md:grid-cols-2 gap-4">
+                <input type="number" name="availableSeats" placeholder="Available Seats" class="w-full p-3 border rounded-lg" min="1" required>
+                <input type="number" name="suggestedFare" placeholder="Fare per seat (₹)" class="w-full p-3 border rounded-lg" min="0" required>
+            </div>
+            <input type="text" name="vehicle_info" placeholder="Vehicle Info (e.g., Toyota Camry, White)" class="w-full p-3 border rounded-lg">
+            <div class="space-y-2"><label class="font-semibold">Preferences:</label>
+                <div class="flex items-center"><input type="checkbox" name="smoking_allowed" class="mr-2 h-4 w-4"><label>Smoking Allowed</label></div>
+                <div class="flex items-center"><input type="checkbox" name="pets_allowed" class="mr-2 h-4 w-4"><label>Pets Allowed</label></div>
+                <div class="flex items-center"><input type="checkbox" name="luggage_allowed" class="mr-2 h-4 w-4" checked><label>Luggage Allowed</label></div>
+            </div>
+            <button type="submit" class="w-full bg-indigo-600 text-white p-3 rounded-lg font-semibold">Publish Ride</button>
+        </form>`,
+    'my-trips': `<h2 class="text-3xl font-bold mb-4">My Rides</h2><div id="my-trips-list"></div>`,
+    profile: `<h2 class="text-3xl font-bold mb-4">My Profile</h2><div id="profile-details" class="bg-gray-50 p-6 rounded-lg space-y-3 border"></div>`,
+    chat: `
+        <h2 class="text-3xl font-bold mb-4" id="chat-header">Chat</h2>
+        <div id="chat-container" class="border rounded-lg flex flex-col h-[60vh]">
+            <div id="chatMessages" class="flex-1 p-4 overflow-y-auto bg-gray-50"></div>
+            <form id="chat-form" class="p-4 border-t flex">
+                <input type="text" id="chat-input" class="flex-1 p-2 border rounded-l-md" placeholder="Type a message...">
+                <button type="submit" class="bg-indigo-600 text-white px-4 rounded-r-md">Send</button>
+            </form>
+        </div>`
+};
+
+document.addEventListener('DOMContentLoaded', () => {
+    const state = { accessToken: localStorage.getItem('accessToken'), refreshToken: localStorage.getItem('refreshToken'), user: JSON.parse(localStorage.getItem('user')), socket: null, currentChatRequestId: null, currentPage: 'login' };
+    const API_URL = '';
+    const pages = { login: document.getElementById('login'), register: document.getElementById('register'), home: document.getElementById('home'), 'post-trip': document.getElementById('post-trip'), 'my-trips': document.getElementById('my-trips'), profile: document.getElementById('profile'), chat: document.getElementById('chat') };
+    const navLinks = document.getElementById('nav-links');
+    
+    async function apiRequest(endpoint, method = 'GET', body = null) {
+        showLoading(true);
+        const headers = { 'Content-Type': 'application/json' };
+        if (state.accessToken) headers['Authorization'] = `Bearer ${state.accessToken}`;
+        const config = { method, headers, body: body ? JSON.stringify(body) : null };
+        try {
+            let response = await fetch(API_URL + endpoint, config);
+            if (response.status === 401 && state.refreshToken) {
+                const refreshSuccess = await refreshAccessToken();
+                if (refreshSuccess) {
+                    headers['Authorization'] = `Bearer ${state.accessToken}`;
+                    response = await fetch(API_URL + endpoint, config);
+                } else {
+                    handleLogout();
+                    showAlert('Session expired. Please log in again.');
+                    return null;
+                }
+            }
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.message || 'An API error occurred');
+            }
+            return response.status === 204 ? true : await response.json();
+        } catch (error) {
+            showAlert(error.message);
+            return null;
+        } finally {
+            showLoading(false);
+        }
+    }
+
+    async function refreshAccessToken() {
+        const res = await fetch(API_URL + '/api/refresh-token', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ refreshToken: state.refreshToken }) });
+        if (!res.ok) return false;
+        const data = await res.json();
+        state.accessToken = data.accessToken;
+        localStorage.setItem('accessToken', data.accessToken);
+        return true;
+    }
+
+    function showPage(pageId) {
+        Object.values(pages).forEach(p => p.classList.remove('active-page'));
+        if (pages[pageId]) {
+            pages[pageId].classList.add('active-page');
+            pages[pageId].innerHTML = Templates[pageId];
+            if (pageId === 'post-trip') {
+                setTimeout(() => {
+                    const now = new Date();
+                    now.setHours(now.getHours() + 1);
+                    const dateInput = document.querySelector('#post-trip-form [name="departureDate"]');
+                    const timeInput = document.querySelector('#post-trip-form [name="departureTime"]');
+                    if(dateInput) dateInput.value = now.toISOString().split('T')[0];
+                    if(timeInput) timeInput.value = now.toTimeString().slice(0, 5);
+                }, 0);
+            }
+        }
+        state.currentPage = pageId;
+    }
+
+    function updateUIForAuthState() {
+        if (state.accessToken && state.user) {
+            navLinks.classList.remove('hidden');
+            showPage('home');
+            loadHomePageData();
+            connectSocket();
+        } else {
+            navLinks.classList.add('hidden');
+            showPage('login');
+        }
+    }
+
+    function showLoading(isLoading) { document.getElementById('loading-spinner').classList.toggle('hidden', !isLoading); }
+    let alertTimeout;
+    function showAlert(message, isSuccess = false) {
+        const modal = document.getElementById('alert-modal');
+        document.getElementById('alert-message').textContent = message;
+        modal.className = `fixed top-5 right-5 text-white p-4 rounded-lg shadow-lg z-[100] ${isSuccess ? 'bg-green-500' : 'bg-red-500'}`;
+        clearTimeout(alertTimeout);
+        alertTimeout = setTimeout(() => modal.classList.add('hidden'), 4000);
+    }
+
+    function renderTripResults(trips) {
+        const container = document.getElementById('trip-results');
+        if (!container) return;
+        container.innerHTML = !trips || trips.length === 0 ? `<p class="text-gray-500 text-center">No rides found.</p>` : trips.map(trip => `
+            <div class="border rounded-lg p-4 shadow-sm">
+                <div><p class="font-bold text-lg">${trip.origin} to ${trip.destination}</p><p class="text-sm text-gray-600">Driver: ${trip.driver_name} (⭐ ${trip.driver_rating || 'N/A'})</p></div>
+                <div class="text-right"><p class="font-bold text-xl text-indigo-600">₹${trip.suggested_fare}</p></div>
+                <div class="mt-4 text-sm flex justify-between"><span>📅 ${new Date(trip.departure_date).toLocaleDateString()} at ${trip.departure_time.slice(0,5)}</span><span>💺 ${trip.available_seats - trip.booked_seats} seats left</span></div>
+                <button class="request-ride-btn mt-4 w-full bg-green-500 text-white p-2 rounded" data-trip-id="${trip.id}">Request Ride</button>
+            </div>`).join('');
+    }
+    
+    function renderMyTrips(data) {
+        const container = document.getElementById('my-trips-list');
+        if (!container) return;
+        let html = `<h3 class="text-xl font-semibold mb-2 border-b pb-2">Rides You're Offering</h3>`;
+        html += (!data.offered || data.offered.length === 0) ? `<p class="text-gray-500">You haven't offered any rides.</p>` : data.offered.map(trip => `
+            <div class="border rounded-lg p-4 mb-4 shadow-sm">
+                <p class="font-bold">${trip.origin} to ${trip.destination}</p>
+                <p>Date: ${new Date(trip.departure_date).toLocaleDateString()} at ${trip.departure_time.slice(0,5)}</p>
+                <p>Status: <span class="font-semibold capitalize text-green-600">${trip.status}</span></p>
+                <div class="mt-2 space-x-2">
+                    ${trip.status === 'active' ? `<button class="start-trip-btn bg-blue-500 text-white px-3 py-1 rounded text-sm" data-trip-id="${trip.id}">Start</button>` : ''}
+                    ${trip.status === 'started' ? `<button class="complete-trip-btn bg-green-500 text-white px-3 py-1 rounded text-sm" data-trip-id="${trip.id}">Complete</button>` : ''}
+                </div>
+                <div id="requests-for-trip-${trip.id}" class="mt-2"></div>
+            </div>`).join('');
+        html += `<h3 class="text-xl font-semibold mt-6 mb-2 border-b pb-2">Rides You've Requested</h3>`;
+        html += (!data.booked || data.booked.length === 0) ? `<p class="text-gray-500">You haven't booked any rides.</p>` : data.booked.map(req => `
+            <div class="border rounded-lg p-4 mb-4 shadow-sm">
+                <p class="font-bold">${req.origin} to ${req.destination}</p>
+                <p>Status: <span class="font-semibold capitalize text-indigo-600">${req.request_status}</span></p>
+                ${req.request_status === 'accepted' ? `<button class="chat-btn mt-2 bg-purple-500 text-white p-2 rounded text-sm" data-request-id="${req.id}">Chat</button>` : ''}
+            </div>`).join('');
+        container.innerHTML = html;
+    }
+
+    function renderRideRequestsForDriver(tripId, requests) {
+        const container = document.getElementById(`requests-for-trip-${tripId}`);
+        if (!container || !requests || requests.length === 0) return;
+        container.innerHTML = `<h4 class="font-semibold mt-3">Pending Requests:</h4>` + requests.map(req => `
+            <div class="bg-gray-100 p-2 rounded mt-2 flex justify-between items-center">
+                <p>${req.passenger_name} (${req.requested_seats} seat(s))</p>
+                <div>
+                    <button class="accept-request-btn bg-green-500 text-white px-2 py-1 text-sm rounded" data-request-id="${req.id}">Accept</button>
+                    <button class="decline-request-btn bg-red-500 text-white px-2 py-1 text-sm rounded ml-1" data-request-id="${req.id}">Decline</button>
+                </div>
+            </div>`).join('');
+    }
+
+    function renderProfile(profile) {
+        const container = document.getElementById('profile-details');
+        if (!container) return;
+        container.innerHTML = `<p><strong>Name:</strong> ${profile.name}</p><p><strong>Email:</strong> ${profile.email}</p><p><strong>Phone:</strong> ${profile.phone || 'N/A'}</p><p><strong>Role:</strong> ${profile.is_driver ? 'Driver & Passenger' : 'Passenger'}</p><p><strong>Rating:</strong> ⭐ ${profile.rating || 'N/A'} (${profile.total_ratings} ratings)</p>`;
+    }
+
+    function renderChatMessages(messages) {
+        const container = document.getElementById('chatMessages');
+        if(!container) return;
+        container.innerHTML = messages.map(msg => `<div class="flex ${msg.sender_id === state.user.id ? 'justify-end' : 'justify-start'} mb-2"><div class="rounded-lg p-2 max-w-xs ${msg.sender_id === state.user.id ? 'bg-indigo-500 text-white' : 'bg-gray-300'}"><p>${msg.message}</p></div></div>`).join('');
+        container.scrollTop = container.scrollHeight;
+    }
+
+    async function handleLogin(e) {
+        e.preventDefault();
+        const data = await apiRequest('/api/login', 'POST', { email: e.target.elements['login-email'].value, password: e.target.elements['login-password'].value }, false);
+        if (data) {
+            Object.assign(state, { accessToken: data.accessToken, refreshToken: data.refreshToken, user: data.user });
+            localStorage.setItem('accessToken', data.accessToken);
+            localStorage.setItem('refreshToken', data.refreshToken);
+            localStorage.setItem('user', JSON.stringify(data.user));
+            showAlert('Login successful!', true);
+            updateUIForAuthState();
+        }
+    }
+
+    async function handleRegister(e) {
+        e.preventDefault();
+        const formData = new FormData(e.target);
+        const body = Object.fromEntries(formData.entries());
+        body.is_driver = e.target.elements.is_driver.checked;
+        const data = await apiRequest('/api/register', 'POST', body, false);
+        if (data) {
+            showAlert(data.message, true);
+            showPage('login');
+        }
+    }
+
+    function handleLogout() {
+        localStorage.clear();
+        Object.assign(state, { accessToken: null, refreshToken: null, user: null });
+        if (state.socket) state.socket.disconnect();
+        updateUIForAuthState();
+    }
+
+    async function loadHomePageData() {
+        const today = new Date().toISOString().split('T')[0];
+        const dateInput = document.querySelector('#search-form [name="departureDate"]');
+        if (dateInput) dateInput.value = today;
+        const data = await apiRequest(`/api/trips/search?departureDate=${today}`);
+        if (data) renderTripResults(data.trips);
+    }
+
+    async function handleSearch(e) {
+        e.preventDefault();
+        const formData = new FormData(e.target);
+        const params = new URLSearchParams();
+        for (const [key, value] of formData.entries()) {
+            if (value) {
+                params.append(key, value);
+            }
+        }
+        const data = await apiRequest(`/api/trips/search?${params.toString()}`);
+        if (data) renderTripResults(data.trips);
+    }
+    
+    async function handlePostTrip(e) {
+        e.preventDefault();
+        const formData = new FormData(e.target);
+        const body = Object.fromEntries(formData.entries());
+        body.smoking_allowed = e.target.elements.smoking_allowed.checked;
+        body.pets_allowed = e.target.elements.pets_allowed.checked;
+        body.luggage_allowed = e.target.elements.luggage_allowed.checked;
+        const result = await apiRequest('/api/trips', 'POST', body);
+        if (result) {
+            showAlert('Ride published successfully!', true);
+            showPage('my-trips');
+            loadMyTripsData();
+        }
+    }
+
+    async function loadMyTripsData() {
+        const [offered, booked, pending] = await Promise.all([
+            apiRequest('/api/my-trips?role=driver'),
+            apiRequest('/api/my-trips?role=passenger'),
+            apiRequest('/api/ride-requests/driver?status=pending')
+        ]);
+        renderMyTrips({ offered: offered?.trips, booked: booked?.trips });
+        if (pending?.requests) {
+            const requestsByTrip = pending.requests.reduce((acc, req) => {
+                (acc[req.trip_id] = acc[req.trip_id] || []).push(req);
+                return acc;
+            }, {});
+            for (const tripId in requestsByTrip) renderRideRequestsForDriver(tripId, requestsByTrip[tripId]);
+        }
+    }
+
+    async function loadProfileData() {
+        const data = await apiRequest('/api/profile');
+        if (data) renderProfile(data);
+    }
+    
+    async function handleRequestRide(tripId) {
+        const seats = prompt("How many seats?", "1");
+        if (seats && !isNaN(parseInt(seats))) {
+            const message = prompt("Optional message for driver:", "");
+            const result = await apiRequest('/api/ride-requests', 'POST', { tripId: parseInt(tripId), requestedSeats: parseInt(seats), message });
+            if(result) {
+                showAlert('Ride request sent!', true);
+                showPage('my-trips');
+                loadMyTripsData();
+            }
+        }
+    }
+
+    async function handleRequestStatusUpdate(requestId, status) {
+        const result = await apiRequest(`/api/ride-requests/${requestId}/status`, 'PUT', { status });
+        if (result) {
+            showAlert(`Request ${status}!`, true);
+            loadMyTripsData();
+        }
+    }
+
+    async function handleTripStatusUpdate(tripId, status) {
+        const result = await apiRequest(`/api/trips/${tripId}/${status}`, 'PUT');
+        if (result) {
+            showAlert(`Trip ${status} successfully!`, true);
+            loadMyTripsData();
+        }
+    }
+    
+    async function openChat(requestId) {
+        state.currentChatRequestId = requestId;
+        showPage('chat');
+        const data = await apiRequest(`/api/chat/${requestId}`);
+        if(data) {
+            renderChatMessages(data.messages);
+            state.socket.emit('join_chat', requestId);
+        }
+    }
+
+    async function handleSendMessage(e) {
+        e.preventDefault();
+        const input = e.target.elements['chat-input'];
+        const message = input.value.trim();
+        if (message && state.socket) {
+            state.socket.emit('send_message', { requestId: state.currentChatRequestId, message });
+            input.value = '';
+        }
+    }
+    
+    function connectSocket() {
+        if (state.socket || !state.accessToken) return;
+        state.socket = io(window.location.origin, { auth: { token: state.accessToken } });
+        state.socket.on('connect', () => state.socket.emit('join_user_notifications'));
+        state.socket.on('new_notification', (notification) => {
+            showAlert(`Notification: ${notification.title}`, true);
+            if (state.currentPage === 'my-trips') loadMyTripsData();
+        });
+        state.socket.on('new_message', (message) => {
+            if (state.currentPage === 'chat' && message.request_id === state.currentChatRequestId) {
+                const container = document.getElementById('chatMessages');
+                container.innerHTML += `<div class="flex ${message.sender_id === state.user.id ? 'justify-end' : 'justify-start'} mb-2"><div class="rounded-lg p-2 max-w-xs ${message.sender_id === state.user.id ? 'bg-indigo-500 text-white' : 'bg-gray-300'}"><p>${message.message}</p></div></div>`;
+                container.scrollTop = container.scrollHeight;
+            } else {
+                showAlert(`New message received!`, true);
+            }
+        });
+    }
+
+    function setupEventListeners() {
+        document.body.addEventListener('submit', e => {
+            e.preventDefault();
+            if (e.target.id === 'login-form') handleLogin(e);
+            if (e.target.id === 'register-form') handleRegister(e);
+            if (e.target.id === 'search-form') handleSearch(e);
+            if (e.target.id === 'post-trip-form') handlePostTrip(e);
+            if (e.target.id === 'chat-form') handleSendMessage(e);
+        });
+        
+        document.body.addEventListener('click', e => {
+            if (e.target.classList.contains('nav-link')) {
+                e.preventDefault();
+                const pageId = e.target.dataset.page;
+                showPage(pageId);
+                if (pageId === 'home') loadHomePageData();
+                if (pageId === 'my-trips') loadMyTripsData();
+                if (pageId === 'profile') loadProfileData();
+            }
+            if (e.target.id === 'logo' && state.user) { showPage('home'); loadHomePageData(); }
+            if (e.target.id === 'logout-btn') handleLogout();
+            if (e.target.classList.contains('request-ride-btn')) handleRequestRide(e.target.dataset.tripId);
+            if (e.target.classList.contains('accept-request-btn')) handleRequestStatusUpdate(e.target.dataset.requestId, 'accepted');
+            if (e.target.classList.contains('decline-request-btn')) handleRequestStatusUpdate(e.target.dataset.requestId, 'declined');
+            if (e.target.classList.contains('chat-btn')) openChat(e.target.dataset.requestId);
+            if (e.target.classList.contains('start-trip-btn')) handleTripStatusUpdate(e.target.dataset.tripId, 'start');
+            if (e.target.classList.contains('complete-trip-btn')) handleTripStatusUpdate(e.target.dataset.tripId, 'complete');
+        });
+    }
+
+    function initialize() {
+        setupEventListeners();
+        updateUIForAuthState();
+    }
+    initialize();
+});
+</script>
+</body>
+</html>
