@@ -14,6 +14,7 @@ const rateLimit = require('express-rate-limit');
 const helmet = require('helmet');
 const compression = require('compression');
 const crypto = require('crypto');
+// **FIX:** The 'node-fetch' import is removed as it's built-in in modern Node.js
 
 // --- Basic Setup ---
 const app = express();
@@ -36,7 +37,7 @@ app.use(helmet({
       scriptSrc: ["'self'", "'unsafe-inline'", "https://cdn.tailwindcss.com", "https://cdnjs.cloudflare.com"],
       styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
       fontSrc: ["'self'", "https://fonts.gstatic.com"],
-      connectSrc: ["'self'", "ws://localhost:3000"],
+      connectSrc: ["'self'", "ws://localhost:3000", "https://nominatim.openstreetmap.org"], // Allow connection to geocoding API
       imgSrc: ["'self'", "data:", "https:"],
     },
   },
@@ -85,6 +86,24 @@ async function createTables() {
         `CREATE TABLE IF NOT EXISTS notifications (id INT AUTO_INCREMENT PRIMARY KEY, user_id INT NOT NULL, title VARCHAR(255) NOT NULL, message TEXT NOT NULL, type ENUM('trip_request', 'request_accepted', 'request_declined', 'trip_started', 'trip_completed', 'system', 'message') NOT NULL, is_read BOOLEAN DEFAULT FALSE, related_id INT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE)`
     ];
     for (const query of queries) await pool.execute(query);
+}
+
+async function geocode(locationName) {
+    if (!locationName) return null;
+    try {
+        const response = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(locationName)}&format=json&limit=1&countrycodes=in`);
+        const data = await response.json();
+        if (data && data.length > 0) {
+            return {
+                lat: parseFloat(data[0].lat),
+                lng: parseFloat(data[0].lon)
+            };
+        }
+        return null;
+    } catch (error) {
+        console.error("Geocoding error:", error);
+        return null;
+    }
 }
 
 function authenticateToken(req, res, next) {
@@ -158,8 +177,13 @@ app.get('/api/profile', authenticateToken, async (req, res) => {
 });
 
 app.post('/api/trips', authenticateToken, checkDriverRole, async (req, res) => {
-    const { origin, destination, originLat, originLng, destinationLat, destinationLng, departureDate, departureTime, availableSeats, suggestedFare, vehicle_info, smoking_allowed, pets_allowed, luggage_allowed } = req.body;
-    await pool.execute(`INSERT INTO trips (driver_id, origin, destination, origin_lat, origin_lng, destination_lat, destination_lng, departure_date, departure_time, available_seats, suggested_fare, vehicle_info, smoking_allowed, pets_allowed, luggage_allowed) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [req.user.id, origin, destination, originLat, originLng, destinationLat, destinationLng, departureDate, departureTime, availableSeats, suggestedFare, vehicle_info || null, !!smoking_allowed, !!pets_allowed, !!luggage_allowed]);
+    const { origin, destination, departureDate, departureTime, availableSeats, suggestedFare, vehicle_info, smoking_allowed, pets_allowed, luggage_allowed } = req.body;
+    const originCoords = await geocode(origin);
+    const destCoords = await geocode(destination);
+    if (!originCoords || !destCoords) {
+        return res.status(400).json({ message: "Could not find coordinates for the specified locations. Please be more specific." });
+    }
+    await pool.execute(`INSERT INTO trips (driver_id, origin, destination, origin_lat, origin_lng, destination_lat, destination_lng, departure_date, departure_time, available_seats, suggested_fare, vehicle_info, smoking_allowed, pets_allowed, luggage_allowed) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [req.user.id, origin, destination, originCoords.lat, originCoords.lng, destCoords.lat, destCoords.lng, departureDate, departureTime, availableSeats, suggestedFare, vehicle_info || null, !!smoking_allowed, !!pets_allowed, !!luggage_allowed]);
     res.status(201).json({ message: 'Trip created successfully' });
 });
 
@@ -175,14 +199,25 @@ app.get('/api/trips/search', async (req, res) => {
         const originQuery = origin?.toLowerCase().trim();
         const destinationQuery = destination?.toLowerCase().trim();
 
-        if (originQuery) {
+        const originCoords = await geocode(originQuery);
+        const destCoords = await geocode(destinationQuery);
+
+        if (originCoords) {
+            whereClauses.push(`(6371 * acos(cos(radians(?)) * cos(radians(t.origin_lat)) * cos(radians(t.origin_lng) - radians(?)) + sin(radians(?)) * sin(radians(t.origin_lat)))) <= 50`);
+            params.push(originCoords.lat, originCoords.lng, originCoords.lat);
+        } else if (originQuery) {
             whereClauses.push(`LOWER(t.origin) LIKE ?`);
             params.push(`%${originQuery}%`);
         }
-        if (destinationQuery) {
+
+        if (destCoords) {
+            whereClauses.push(`(6371 * acos(cos(radians(?)) * cos(radians(t.destination_lat)) * cos(radians(t.destination_lng) - radians(?)) + sin(radians(?)) * sin(radians(t.destination_lat)))) <= 50`);
+            params.push(destCoords.lat, destCoords.lng, destCoords.lat);
+        } else if (destinationQuery) {
             whereClauses.push(`LOWER(t.destination) LIKE ?`);
             params.push(`%${destinationQuery}%`);
         }
+        
         if (departureDate) {
             whereClauses.push(`t.departure_date = ?`);
             params.push(departureDate);
@@ -341,7 +376,6 @@ io.on('connection', (socket) => {
       const [reqData] = await pool.execute('SELECT t.driver_id, rr.passenger_id FROM ride_requests rr JOIN trips t ON rr.trip_id = t.id WHERE rr.id = ?', [requestId]);
       if (reqData.length > 0 && (senderId === reqData[0].driver_id || senderId === reqData[0].passenger_id)) {
           const [result] = await pool.execute('INSERT INTO chat_messages (request_id, sender_id, message) VALUES (?, ?, ?)', [requestId, senderId, message]);
-          // **FIX:** Include request_id in the emitted message payload
           const messageData = { id: result.insertId, request_id: requestId, sender_id: senderId, message, sender_name: socket.user.name };
           io.to(`chat_${requestId}`).emit('new_message', messageData);
       }
