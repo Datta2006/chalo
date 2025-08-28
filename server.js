@@ -10,12 +10,9 @@ const http = require('http');
 const socketIo = require('socket.io');
 const cors = require('cors');
 const path = require('path');
-const multer = require('multer');
 const rateLimit = require('express-rate-limit');
 const helmet = require('helmet');
 const compression = require('compression');
-const { body, validationResult, param, query } = require('express-validator');
-const nodemailer = require('nodemailer');
 const crypto = require('crypto');
 
 // --- Basic Setup ---
@@ -58,7 +55,7 @@ app.use(generalLimiter);
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your_super_secret_jwt_key';
 const REFRESH_SECRET = process.env.REFRESH_SECRET || 'your_super_secret_refresh_key';
-const dbConfig = { host: process.env.DB_HOST || 'localhost', user: process.env.DB_USER || 'root', password: process.env.DB_PASSWORD || '', database: process.env.DB_NAME || 'chalo_db', connectionLimit: 15 };
+const dbConfig = { host: process.env.DB_HOST || 'localhost', user: process.env.DB_USER || 'root', password: process.env.DB_PASSWORD || 'Datta@2006', database: process.env.DB_NAME || 'chalo_db', connectionLimit: 15 };
 let pool;
 
 // =============================================================================
@@ -182,12 +179,10 @@ app.get('/api/trips/search', async (req, res) => {
             whereClauses.push(`LOWER(t.origin) LIKE ?`);
             params.push(`%${originQuery}%`);
         }
-
         if (destinationQuery) {
             whereClauses.push(`LOWER(t.destination) LIKE ?`);
             params.push(`%${destinationQuery}%`);
         }
-        
         if (departureDate) {
             whereClauses.push(`t.departure_date = ?`);
             params.push(departureDate);
@@ -202,7 +197,7 @@ app.get('/api/trips/search', async (req, res) => {
         const mainQuery = `SELECT t.*, u.name as driver_name, u.rating as driver_rating FROM trips t JOIN users u ON t.driver_id = u.id WHERE ${whereSql} ORDER BY t.departure_date, t.departure_time LIMIT ${finalLimit} OFFSET ${finalOffset}`;
         const [trips] = await pool.execute(mainQuery, params);
 
-        res.json({ trips, pagination: { page: parseInt(page, 10), total, pages: Math.ceil(total / finalLimit) } });
+        res.json({ trips });
     } catch (error) {
         console.error('Search trips error:', error);
         res.status(500).json({ message: 'Failed to search trips' });
@@ -215,7 +210,7 @@ app.get('/api/my-trips', authenticateToken, async (req, res) => {
         const [trips] = await pool.execute(`SELECT * FROM trips WHERE driver_id = ? ORDER BY departure_date DESC`, [req.user.id]);
         res.json({ trips });
     } else if (role === 'passenger') {
-        const [requests] = await pool.execute(`SELECT rr.id, rr.status as request_status, t.* FROM ride_requests rr JOIN trips t ON rr.trip_id = t.id WHERE rr.passenger_id = ? ORDER BY t.departure_date DESC`, [req.user.id]);
+        const [requests] = await pool.execute(`SELECT rr.id as request_id, rr.status as request_status, t.* FROM ride_requests rr JOIN trips t ON rr.trip_id = t.id WHERE rr.passenger_id = ? ORDER BY t.departure_date DESC`, [req.user.id]);
         res.json({ trips: requests });
     }
 });
@@ -225,7 +220,6 @@ app.get('/api/ride-requests/driver', authenticateToken, checkDriverRole, async (
     res.json({ requests });
 });
 
-// **NEW:** Endpoint to get details for a specific ride request
 app.get('/api/ride-requests/:id', authenticateToken, async (req, res) => {
     const [requests] = await pool.execute(`
         SELECT 
@@ -243,12 +237,21 @@ app.get('/api/ride-requests/:id', authenticateToken, async (req, res) => {
     if (requests.length === 0) return res.status(404).json({ message: 'Ride request not found' });
     
     const request = requests[0];
-    // Security check: ensure the current user is part of this ride
     if (req.user.id !== request.passenger_id && req.user.id !== request.driver_id) {
         return res.status(403).json({ message: 'Forbidden' });
     }
 
     res.json(request);
+});
+
+app.get('/api/trips/:id/management', authenticateToken, checkDriverRole, async (req, res) => {
+    const tripId = req.params.id;
+    const driverId = req.user.id;
+    const [trips] = await pool.execute('SELECT * FROM trips WHERE id = ? AND driver_id = ?', [tripId, driverId]);
+    if (trips.length === 0) return res.status(404).json({ message: 'Trip not found or you are not the driver.' });
+    const [pendingRequests] = await pool.execute(`SELECT rr.id, rr.requested_seats, u.name as passenger_name, u.rating as passenger_rating FROM ride_requests rr JOIN users u ON rr.passenger_id = u.id WHERE rr.trip_id = ? AND rr.status = 'pending'`, [tripId]);
+    const [acceptedPassengers] = await pool.execute(`SELECT rr.id, rr.requested_seats, u.name as passenger_name, u.rating as passenger_rating FROM ride_requests rr JOIN users u ON rr.passenger_id = u.id WHERE rr.trip_id = ? AND rr.status = 'accepted'`, [tripId]);
+    res.json({ tripDetails: trips[0], pendingRequests, acceptedPassengers });
 });
 
 app.post('/api/ride-requests', authenticateToken, async (req, res) => {
@@ -338,7 +341,8 @@ io.on('connection', (socket) => {
       const [reqData] = await pool.execute('SELECT t.driver_id, rr.passenger_id FROM ride_requests rr JOIN trips t ON rr.trip_id = t.id WHERE rr.id = ?', [requestId]);
       if (reqData.length > 0 && (senderId === reqData[0].driver_id || senderId === reqData[0].passenger_id)) {
           const [result] = await pool.execute('INSERT INTO chat_messages (request_id, sender_id, message) VALUES (?, ?, ?)', [requestId, senderId, message]);
-          const messageData = { id: result.insertId, sender_id: senderId, message, sender_name: socket.user.name };
+          // **FIX:** Include request_id in the emitted message payload
+          const messageData = { id: result.insertId, request_id: requestId, sender_id: senderId, message, sender_name: socket.user.name };
           io.to(`chat_${requestId}`).emit('new_message', messageData);
       }
   });
